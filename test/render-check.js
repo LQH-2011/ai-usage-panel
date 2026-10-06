@@ -144,7 +144,29 @@ async function main() {
     );
     await reloaded;
   }
-  await sleep(2000); // let the API calls + Chart.js animations settle
+  // Wait for the dashboard to actually populate instead of guessing a delay:
+  // the live functions cold-start and fetch both providers on first load.
+  const deadline = Date.now() + 25000;
+  let populated = false;
+  while (Date.now() < deadline) {
+    const tick = await send(
+      'Runtime.evaluate',
+      {
+        expression: `document.querySelectorAll('#cards .card').length + (document.getElementById('overlay').classList.contains('show') ? 1000 : 0)`,
+        returnByValue: true,
+      },
+      sessionId
+    );
+    const v = Number(tick.result.value) || 0;
+    if (v >= 1000) break; // login overlay is up — nothing more will load
+    if (v > 0) {
+      populated = true;
+      break;
+    }
+    await sleep(400);
+  }
+  await sleep(1200); // let Chart.js finish drawing
+  if (!populated) console.log('WARNING: dashboard did not populate within 25s');
 
   const probe = await send(
     'Runtime.evaluate',
