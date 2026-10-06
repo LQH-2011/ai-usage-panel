@@ -162,14 +162,19 @@
       <div class="canvas-box"><canvas id="chHi"></canvas></div>
     </div>
     <div class="card">
-      <h3>DeepSeek — balance over time</h3>
-      <p class="hint">Account balance as recorded by each collection.</p>
-      <div class="canvas-box"><canvas id="chDs"></canvas></div>
+      <h3>AIHubMix — balance over time</h3>
+      <p class="hint">Remaining account balance recorded at each collection.</p>
+      <div class="canvas-box"><canvas id="chHiBal"></canvas></div>
     </div>
     <div class="card">
       <h3>AIHubMix — usage by API key</h3>
       <p class="hint">Spend within the window, per key.</p>
       <div class="canvas-box"><canvas id="chKeys"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>DeepSeek — balance over time</h3>
+      <p class="hint">Account balance as recorded by each collection.</p>
+      <div class="canvas-box"><canvas id="chDs"></canvas></div>
     </div>
     <div class="card">
       <h3>DeepSeek — cost by model</h3>
@@ -314,20 +319,26 @@
   }
   const baseScale = () => ({ grid: { color: GRID, drawBorder: false }, ticks: { maxTicksLimit: 6 } });
 
-  function lineChart(id, labels, data, color, soft, fmt, fill) {
+  function lineChart(id, labels, data, color, soft, fmt, opts) {
+    const o = opts || {};
     draw(id, {
       type: 'line',
       data: {
         labels,
         datasets: [{
-          data, borderColor: color, backgroundColor: soft, fill: fill !== false,
+          data, borderColor: color, backgroundColor: soft, fill: o.fill !== false,
           borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: .3,
         }],
       },
       options: {
         maintainAspectRatio: false, animation: { duration: 250 },
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmt(c.parsed.y) } } },
-        scales: { x: { ...baseScale(), grid: { display: false } }, y: { ...baseScale(), ticks: { callback: (v) => fmt(v) } } },
+        scales: {
+          x: { ...baseScale(), grid: { display: false } },
+          // A spend curve must include zero; a balance curve must not (a flat
+          // balance at $33 would otherwise render as a line pinned to the top).
+          y: { ...baseScale(), beginAtZero: o.beginAtZero === true, ticks: { callback: (v) => fmt(v) } },
+        },
       },
     });
   }
@@ -414,7 +425,8 @@
     </tr>`).join('');
     $('keysTable').innerHTML = head + `<tbody>${body}</tbody>`;
     $('keysNote').textContent =
-      `Per-key spend is the change in each key's lifetime counter between the first and last snapshot in the window (${usage.aihubmix.points} snapshot(s)). AIHubMix does not expose a per-model usage API for the account key; only DeepSeek offers a per-model breakdown.`;
+      `AIHubMix's API returns used_quota = 0 for every key and never updates accessed_time, so per-key spend always reads $0.00 — it cannot be charted. ` +
+      `Account-level totals (${usage.aihubmix.points} snapshot(s) in this window) are accurate; only DeepSeek offers a per-model breakdown.`;
   }
 
   function renderModels(usage) {
@@ -447,15 +459,35 @@
     const ds = usage.deepseek;
 
     // A single point drawn with pointRadius 0 is invisible, so require 2+.
-    // AIHubMix cumulative spend
-    if (hi.series.length >= 2) {
-      const base = hi.baseline_used_usd || 0;
-      lineChart('chHi', hi.series.map((p) => stampShort(p.ts)),
-        hi.series.map((p) => Math.max(0, p.used_usd - base)),
-        '#7c8cff', 'rgba(124,140,255,.16)', (v) => usd(v, 3));
+    // AIHubMix cumulative spend — only worth drawing when there IS spend:
+    // Chart.js scales an all-zero series into a nonsense (-1..1) axis that
+    // reads as "broken" when the truth is "no usage in this window".
+    const base = hi.baseline_used_usd || 0;
+    const spendVals = hi.series.map((p) => Math.max(0, p.used_usd - base));
+    const lastHi = hi.series[hi.series.length - 1];
+    const lifetimeNote = lastHi
+      ? `Lifetime usage is ${usd(lastHi.used_usd)} across ${num(lastHi.request_count)} requests.`
+      : '';
+    if (hi.series.length >= 2 && spendVals.some((v) => v > 0)) {
+      lineChart('chHi', hi.series.map((p) => stampShort(p.ts)), spendVals,
+        '#7c8cff', 'rgba(124,140,255,.16)', (v) => usd(v, 3), { beginAtZero: true });
+    } else if (hi.series.length >= 2) {
+      drawEmpty('chHi', `No AIHubMix spend in this window. ${lifetimeNote}`);
     } else {
       drawEmpty('chHi', hi.series.length === 1
         ? 'One snapshot so far. The spend curve appears from the second collection onward — reopen this panel later, or wait for the daily cron.'
+        : 'No snapshots in this window.');
+    }
+
+    // AIHubMix balance — always a real number, so this is the
+    // "is AIHubMix actually connected?" chart.
+    if (hi.series.length >= 2) {
+      lineChart('chHiBal', hi.series.map((p) => stampShort(p.ts)),
+        hi.series.map((p) => p.balance_usd),
+        '#7c8cff', 'rgba(124,140,255,.16)', (v) => usd(v), { fill: false });
+    } else {
+      drawEmpty('chHiBal', hi.series.length === 1
+        ? 'One snapshot so far — the balance curve needs at least two collections.'
         : 'No snapshots in this window.');
     }
 
@@ -463,14 +495,15 @@
     if (ds.series.length >= 2) {
       lineChart('chDs', ds.series.map((p) => stampShort(p.ts)),
         ds.series.map((p) => p.balance), '#22d3ee', 'rgba(34,211,238,.14)',
-        (v) => money(v, ds.currency || ''), false);
+        (v) => money(v, ds.currency || ''), { fill: false });
     } else {
       drawEmpty('chDs', ds.series.length === 1
         ? 'One snapshot so far — the balance curve needs at least two collections.'
         : 'No snapshots in this window.');
     }
 
-    // per key
+    // Per key — AIHubMix returns used_quota 0 for every key, so this stays
+    // empty in practice. Say so instead of drawing an empty axis.
     const keys = hi.keys.slice(0, 12);
     const anyKeySpend = keys.some((k) => k.spend_usd > 0);
     if (keys.length && anyKeySpend) {
@@ -478,7 +511,7 @@
         keys.map((k) => k.spend_usd), '#7c8cff', 'rgba(124,140,255,.55)',
         (v) => usd(v, 4), true);
     } else if (keys.length) {
-      drawEmpty('chKeys', 'No spend recorded in this window yet — the bars fill in as usage is collected.');
+      drawEmpty('chKeys', 'AIHubMix reports $0 usage for every key — its API does not expose per-key usage, so no bars can be drawn. Account-level totals are in the cards above.');
     } else {
       drawEmpty('chKeys', 'No key data.');
     }

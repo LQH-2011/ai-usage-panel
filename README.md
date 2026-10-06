@@ -22,16 +22,23 @@ from the snapshots afterwards.
 | --- | --- | --- |
 | Remaining quota / balance | ✅ `/api/user/self` → `quota` | ✅ `/user/balance` |
 | Lifetime usage | ✅ `used_quota`, `request_count` | ❌ (derived from balance drops) |
-| Usage **by API key** | ✅ `/api/token/` → `used_quota`, `remain_quota` per key | ❌ (no per-key API) |
+| Usage **by API key** | ❌ `/api/token/` returns `used_quota: 0` for **every** key and never updates `accessed_time` — the field exists but is not maintained | ❌ (no per-key API) |
 | Usage **over a time period** | ⚠️ derived from snapshots (deltas) | ⚠️ derived from snapshots, plus official daily rows when the platform token is set |
 | Usage **by model** | ❌ no API | ✅ console usage API (optional token) |
 | Per-request log | ❌ console only | ❌ console only |
 
-**Consequence:** AIHubMix per-model usage is not available to any programmatic
-client — its console has the data, but the endpoint behind it
-(`/call/log/usage/by_key`) authenticates with a browser *session* (Clerk JWT),
-not the Manage Key. That is why the "cost by model" chart is DeepSeek-only. The
-per-key chart and spend-over-time chart cover AIHubMix.
+**Consequence:** AIHubMix per-key *and* per-model usage are unavailable to any
+programmatic client. The per-model data exists in its console, but the endpoint
+behind it (`/call/log/usage/by_key`) authenticates with a browser *session*
+(Clerk JWT), not the Manage Key — verified: the Manage Key returns `401` there.
+Per-key `used_quota` is reported as `0` for every key (checked on both the list
+and single-key endpoints), so there is nothing to chart. What AIHubMix *does*
+give reliably is account-level: remaining balance, lifetime spend and request
+count — which is exactly what its cards and charts show.
+
+Consequently the panel never draws a chart it cannot fill: an all-zero series is
+replaced with an explanatory note, because Chart.js otherwise scales it into a
+misleading −1…1 axis that reads as a broken chart.
 
 > **Snapshots are the point.** The more often the panel is opened (or the cron
 > runs), the finer the spend-over-time resolution. Opening the panel triggers a
