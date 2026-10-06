@@ -113,6 +113,11 @@
   .login p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
   .login input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; }
   .login .btn { width: 100%; margin-top: 12px; padding: 10px; }
+  .login .remember {
+    display: flex; align-items: center; gap: 8px; margin-top: 11px;
+    color: var(--muted); font-size: 12.5px; cursor: pointer; user-select: none;
+  }
+  .login .remember input { width: auto; margin: 0; accent-color: var(--hi); }
   .err { color: var(--bad); font-size: 12.5px; min-height: 18px; margin-top: 9px; }
   footer { color: var(--muted); font-size: 11.5px; text-align: center; margin-top: 34px; }
   .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: s .7s linear infinite; vertical-align: -2px; }
@@ -126,6 +131,7 @@
     <h2>AI Usage Panel</h2>
     <p>Enter your panel password.</p>
     <input type="password" id="pw" autocomplete="current-password" placeholder="Password" />
+    <label class="remember"><input type="checkbox" id="remember" checked /> Keep me signed in on this device</label>
     <button class="btn primary" type="submit">Unlock</button>
     <div class="err" id="loginErr"></div>
   </form>
@@ -202,8 +208,10 @@
 (() => {
   'use strict';
   const TOKEN_KEY = 'aup_token';
+  const PASS_KEY = 'aup_pass';
   const $ = (id) => document.getElementById(id);
   let token = localStorage.getItem(TOKEN_KEY) || '';
+  let reauthing = false;
   const state = { range: '7d', from: '', to: '' };
   const charts = {};
 
@@ -233,18 +241,35 @@
       ...opts,
       headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) },
     });
-    if (res.status === 401) { signOut(true); throw new Error('Unauthorized'); }
+    if (res.status === 401) { recoverFromUnauthorized(); throw new Error('Unauthorized'); }
     const body = await res.json().catch(() => ({}));
     if (!res.ok || body.success === false) throw new Error(body.message || ('HTTP ' + res.status));
     return body;
   }
 
   // ── auth ───────────────────────────────────────────────────────────────
+  // Explicit sign-out must forget the saved passphrase too — otherwise the next
+  // load would silently sign straight back in and the button would do nothing.
   function signOut(silent) {
     token = '';
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(PASS_KEY);
     $('overlay').classList.add('show');
     if (!silent) $('loginErr').textContent = '';
+  }
+
+  async function doLogin(password, remember) {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.token) throw new Error(body.message || 'Login failed');
+    token = body.token;
+    localStorage.setItem(TOKEN_KEY, token);
+    if (remember) localStorage.setItem(PASS_KEY, password);
+    else localStorage.removeItem(PASS_KEY);
   }
 
   $('loginForm').addEventListener('submit', async (e) => {
@@ -252,15 +277,7 @@
     const err = $('loginErr');
     err.textContent = '';
     try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: $('pw').value }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || !body.token) throw new Error(body.message || 'Login failed');
-      token = body.token;
-      localStorage.setItem(TOKEN_KEY, token);
+      await doLogin($('pw').value, $('remember').checked);
       $('pw').value = '';
       $('overlay').classList.remove('show');
       load();
@@ -269,6 +286,28 @@
     }
   });
   $('logout').addEventListener('click', () => signOut(false));
+
+  // A rejected session token does not mean the password is wrong (it may simply
+  // have expired), so retry once silently from the remembered passphrase before
+  // bothering the user with the login form.
+  async function recoverFromUnauthorized() {
+    token = '';
+    localStorage.removeItem(TOKEN_KEY);
+    const saved = localStorage.getItem(PASS_KEY);
+    if (saved && !reauthing) {
+      reauthing = true;
+      try {
+        await doLogin(saved, true);
+        reauthing = false;
+        load();
+        return;
+      } catch (ex) {
+        reauthing = false;
+        if (/invalid password/i.test(ex.message)) localStorage.removeItem(PASS_KEY);
+      }
+    }
+    $('overlay').classList.add('show');
+  }
 
   // ── range controls ─────────────────────────────────────────────────────
   $('seg').addEventListener('click', (e) => {
@@ -600,8 +639,23 @@
 
   // ── boot ───────────────────────────────────────────────────────────────
   paintSeg();
-  if (token) { $('overlay').classList.remove('show'); load(); }
-  else { $('overlay').classList.add('show'); }
+  (async function boot() {
+    if (!token) {
+      const saved = localStorage.getItem(PASS_KEY);
+      if (!saved) { $('overlay').classList.add('show'); return; }
+      try {
+        // Silent sign-in from the remembered passphrase — no prompt.
+        await doLogin(saved, true);
+      } catch (ex) {
+        if (/invalid password/i.test(ex.message)) localStorage.removeItem(PASS_KEY);
+        $('overlay').classList.add('show');
+        $('loginErr').textContent = 'Saved password was rejected — please sign in again.';
+        return;
+      }
+    }
+    $('overlay').classList.remove('show');
+    load();
+  })();
 })();
 </script>
 </body>

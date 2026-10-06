@@ -188,11 +188,26 @@ node test/render-check.js http://127.0.0.1:3000 "$TOKEN" shot.png
   collection, every range and custom from/to, routing.
 * `test/render-check.js` — drives headless Chromium over CDP, screenshots the
   dashboard, and **fails on any page or console error**.
+* `test/session-persistence.js` — logs in through the form, **restarts the
+  browser**, and asserts there is no prompt (auto sign-in), then that sign-out
+  forgets the saved passphrase. The browser is closed via CDP `Browser.close`
+  before the SIGKILL, because killing outright can leave `localStorage`
+  unflushed and produce a false failure.
 * The rate-limit assertion locks login from that IP for ~15 minutes; restart the
   dev server to clear it.
 
 ## Security notes
 
+* **"Keep me signed in"** stores the panel passphrase in the browser's
+  `localStorage` (`aup_pass`) and signs in silently on load, so the password is
+  never retyped. That is a deliberate convenience trade-off: anyone with access
+  to that browser profile can open the panel without knowing the password.
+  Untick the box on the login form to store only the 90-day session token.
+  **Sign out always forgets both**, otherwise the next load would silently sign
+  back in.
+* `localStorage` is scoped to an exact origin, so a per-deployment URL
+  (`<project>-<hash>-<team>.vercel.app`) starts empty every time. Bookmark the
+  stable production alias, or attach a custom domain.
 * `AUTH_TOKEN_SECRET` missing ⇒ token signing/verification **fails closed**.
 * Login rate limiting counts **failures only** — a correct password is never
   blocked.

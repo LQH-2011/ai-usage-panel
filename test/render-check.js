@@ -43,7 +43,8 @@ async function main() {
       `--user-data-dir=${userDataDir}`,
       'about:blank',
     ],
-    { stdio: 'ignore' }
+    // detached:true so the whole chrome process tree can be killed below.
+    { stdio: 'ignore', detached: true }
   );
 
   let wsUrl = null;
@@ -200,7 +201,11 @@ async function main() {
   console.log(problems.length ? `PROBLEMS:\n - ${problems.join('\n - ')}` : 'no console/page errors');
 
   sock.close();
-  chrome.kill('SIGKILL');
+  try {
+    process.kill(-chrome.pid, 'SIGKILL');
+  } catch {
+    chrome.kill('SIGKILL');
+  }
   fs.rmSync(userDataDir, { recursive: true, force: true });
   process.exit(problems.length ? 1 : 0);
 }
