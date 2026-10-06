@@ -87,6 +87,10 @@
   .grid .card p.hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
   .canvas-box { position: relative; height: 250px; }
   .canvas-box.tall { height: 290px; }
+  .placeholder {
+    position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+    color: var(--muted); font-size: 12.5px; padding: 0 20px; line-height: 1.6;
+  }
 
   /* ── tables ─────────────────────────────────────────────── */
   .tbl-wrap { overflow-x: auto; }
@@ -300,8 +304,13 @@
   Chart.defaults.font.size = 11;
 
   function draw(id, cfg) {
+    const canvas = $(id);
+    const box = canvas.parentElement;
+    const ph = box.querySelector('.placeholder');
+    if (ph) ph.remove();
+    canvas.style.display = '';
     if (charts[id]) charts[id].destroy();
-    charts[id] = new Chart($(id), cfg);
+    charts[id] = new Chart(canvas, cfg);
   }
   const baseScale = () => ({ grid: { color: GRID, drawBorder: false }, ticks: { maxTicksLimit: 6 } });
 
@@ -437,28 +446,42 @@
     const hi = usage.aihubmix;
     const ds = usage.deepseek;
 
+    // A single point drawn with pointRadius 0 is invisible, so require 2+.
     // AIHubMix cumulative spend
-    if (hi.series.length >= 1) {
+    if (hi.series.length >= 2) {
       const base = hi.baseline_used_usd || 0;
       lineChart('chHi', hi.series.map((p) => stampShort(p.ts)),
         hi.series.map((p) => Math.max(0, p.used_usd - base)),
         '#7c8cff', 'rgba(124,140,255,.16)', (v) => usd(v, 3));
-    } else { drawEmpty('chHi', 'No snapshots in this window.'); }
+    } else {
+      drawEmpty('chHi', hi.series.length === 1
+        ? 'One snapshot so far. The spend curve appears from the second collection onward — reopen this panel later, or wait for the daily cron.'
+        : 'No snapshots in this window.');
+    }
 
     // DeepSeek balance
-    if (ds.series.length >= 1) {
+    if (ds.series.length >= 2) {
       lineChart('chDs', ds.series.map((p) => stampShort(p.ts)),
         ds.series.map((p) => p.balance), '#22d3ee', 'rgba(34,211,238,.14)',
         (v) => money(v, ds.currency || ''), false);
-    } else { drawEmpty('chDs', 'No snapshots in this window.'); }
+    } else {
+      drawEmpty('chDs', ds.series.length === 1
+        ? 'One snapshot so far — the balance curve needs at least two collections.'
+        : 'No snapshots in this window.');
+    }
 
     // per key
     const keys = hi.keys.slice(0, 12);
-    if (keys.length) {
+    const anyKeySpend = keys.some((k) => k.spend_usd > 0);
+    if (keys.length && anyKeySpend) {
       barChart('chKeys', keys.map((k) => k.name || ('#' + k.token_id)),
         keys.map((k) => k.spend_usd), '#7c8cff', 'rgba(124,140,255,.55)',
         (v) => usd(v, 4), true);
-    } else { drawEmpty('chKeys', 'No key data.'); }
+    } else if (keys.length) {
+      drawEmpty('chKeys', 'No spend recorded in this window yet — the bars fill in as usage is collected.');
+    } else {
+      drawEmpty('chKeys', 'No key data.');
+    }
 
     // deepseek models
     window.__dsCur = ds.usage_currency || '';
@@ -470,15 +493,19 @@
     } else { drawEmpty('chModels', ds.usage_api ? 'No per-model rows yet.' : 'Per-model usage off (set DEEPSEEK_PLATFORM_TOKEN).'); }
   }
 
+  // An empty chart is worse than no chart: swap the canvas for a readable note.
   function drawEmpty(id, text) {
-    draw(id, {
-      type: 'doughnut',
-      data: { labels: [text], datasets: [{ data: [1], backgroundColor: ['#1b2233'], borderWidth: 0 }] },
-      options: {
-        maintainAspectRatio: false, cutout: '72%', events: [],
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-      },
-    });
+    const canvas = $(id);
+    if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+    canvas.style.display = 'none';
+    const box = canvas.parentElement;
+    let ph = box.querySelector('.placeholder');
+    if (!ph) {
+      ph = document.createElement('div');
+      ph.className = 'placeholder';
+      box.appendChild(ph);
+    }
+    ph.textContent = text;
   }
 
   function summaryCards(usage) {
