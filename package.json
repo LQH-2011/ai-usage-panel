@@ -1,0 +1,16 @@
+{
+  "name": "ai-usage-panel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Unified panel for AIHubMix + DeepSeek: usage by key, by model, over time, plus quota.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "node dev-server.js",
+    "hash-password": "node scripts/hash-password.js"
+  },
+  "dependencies": {
+    "pg": "^8.11.5"
+  }
+}

@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<link rel="icon" href="data:," />
+<title>AI Usage Panel</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --panel: #141a29;
+    --panel-2: #1b2233;
+    --border: #262e42;
+    --text: #e6e9f2;
+    --muted: #8b95ad;
+    --hi: #7c8cff;          /* AIHubMix */
+    --hi-soft: rgba(124, 140, 255, 0.16);
+    --ds: #22d3ee;          /* DeepSeek */
+    --ds-soft: rgba(34, 211, 238, 0.16);
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(1200px 600px at 15% -10%, #1a2340 0%, var(--bg) 55%) fixed;
+    color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--hi); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 22px 18px 60px; }
+
+  /* ── header ─────────────────────────────────────────────── */
+  header.top { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: linear-gradient(135deg, var(--hi), var(--ds)); box-shadow: 0 0 14px var(--hi); }
+  .brand h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  .brand small { color: var(--muted); font-weight: 400; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .seg { display: inline-flex; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .seg button {
+    background: none; border: 0; color: var(--muted); padding: 7px 12px; cursor: pointer;
+    font: inherit; font-size: 13px; border-right: 1px solid var(--border);
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { color: var(--text); background: var(--panel-2); }
+  .seg button.on { background: var(--hi-soft); color: var(--text); box-shadow: inset 0 -2px 0 var(--hi); }
+  input[type="date"], .btn {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    border-radius: 10px; padding: 7px 11px; font: inherit; font-size: 13px;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.7); }
+  .btn { cursor: pointer; }
+  .btn:hover { background: var(--panel-2); }
+  .btn.primary { background: var(--hi-soft); border-color: #46508a; }
+  .btn[disabled] { opacity: .55; cursor: default; }
+
+  /* ── cards ──────────────────────────────────────────────── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin-bottom: 16px; }
+  .card {
+    background: linear-gradient(180deg, var(--panel) 0%, #121728 100%);
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 16px;
+  }
+  .card.plat { position: relative; overflow: hidden; }
+  .card.plat::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; }
+  .card.plat.hi::before { background: var(--hi); }
+  .card.plat.ds::before { background: var(--ds); }
+  .card h2 { margin: 0 0 10px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .big { font-size: 27px; font-weight: 680; letter-spacing: -.4px; }
+  .big small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 6px; }
+  .kv { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 13px; }
+  .kv span:first-child { color: var(--muted); }
+  .kv span:last-child { font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--border); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: #1f5c46; background: rgba(52,211,153,.08); }
+  .pill.bad { color: var(--bad); border-color: #6b2b2b; background: rgba(248,113,113,.08); }
+
+  /* ── chart grid ─────────────────────────────────────────── */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 14px; margin-bottom: 16px; }
+  .grid .card h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+  .grid .card p.hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+  .canvas-box { position: relative; height: 250px; }
+  .canvas-box.tall { height: 290px; }
+
+  /* ── tables ─────────────────────────────────────────────── */
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  tbody tr:hover { background: var(--panel-2); }
+  td.num { font-variant-numeric: tabular-nums; }
+  .tag { font-size: 11px; color: var(--muted); }
+  .empty { color: var(--muted); padding: 14px 2px; font-size: 13px; }
+  .warnbox { background: rgba(251,191,36,.07); border: 1px solid #4d3d12; color: #e7c98a; border-radius: 10px; padding: 10px 13px; font-size: 12.5px; margin-bottom: 14px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+  /* ── login ──────────────────────────────────────────────── */
+  .overlay { position: fixed; inset: 0; background: rgba(6,9,16,.86); backdrop-filter: blur(7px); display: none; place-items: center; z-index: 50; }
+  .overlay.show { display: grid; }
+  .login { width: min(360px, 92vw); background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 26px; }
+  .login h2 { margin: 0 0 4px; font-size: 17px; }
+  .login p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+  .login input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; }
+  .login .btn { width: 100%; margin-top: 12px; padding: 10px; }
+  .err { color: var(--bad); font-size: 12.5px; min-height: 18px; margin-top: 9px; }
+  footer { color: var(--muted); font-size: 11.5px; text-align: center; margin-top: 34px; }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: s .7s linear infinite; vertical-align: -2px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="overlay" id="overlay">
+  <form class="login" id="loginForm">
+    <h2>AI Usage Panel</h2>
+    <p>Enter your panel password.</p>
+    <input type="password" id="pw" autocomplete="current-password" placeholder="Password" />
+    <button class="btn primary" type="submit">Unlock</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</div>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>AI Usage Panel <small id="subtitle">AIHubMix · DeepSeek</small></h1>
+    </div>
+    <div class="controls">
+      <div class="seg" id="seg">
+        <button data-range="24h">24h</button>
+        <button data-range="7d">7d</button>
+        <button data-range="30d">30d</button>
+        <button data-range="90d">90d</button>
+        <button data-range="all">All</button>
+      </div>
+      <input type="date" id="from" />
+      <input type="date" id="to" />
+      <button class="btn" id="refresh">Refresh</button>
+      <button class="btn" id="logout">Sign out</button>
+    </div>
+  </header>
+
+  <div id="warnings"></div>
+  <section class="cards" id="cards"></section>
+
+  <section class="grid">
+    <div class="card">
+      <h3>AIHubMix — spend over time</h3>
+      <p class="hint">Cumulative spend inside the selected window, from usage snapshots.</p>
+      <div class="canvas-box"><canvas id="chHi"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>DeepSeek — balance over time</h3>
+      <p class="hint">Account balance as recorded by each collection.</p>
+      <div class="canvas-box"><canvas id="chDs"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>AIHubMix — usage by API key</h3>
+      <p class="hint">Spend within the window, per key.</p>
+      <div class="canvas-box"><canvas id="chKeys"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>DeepSeek — cost by model</h3>
+      <p class="hint" id="dsModelHint">Per-model cost inside the window.</p>
+      <div class="canvas-box tall"><canvas id="chModels"></canvas></div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom:16px">
+    <h3 style="margin:0 0 10px;font-size:14px">API keys — AIHubMix</h3>
+    <div class="tbl-wrap"><table id="keysTable"><tbody></tbody></table></div>
+    <p class="note" id="keysNote"></p>
+  </section>
+
+  <section class="card">
+    <h3 style="margin:0 0 10px;font-size:14px">Models — DeepSeek</h3>
+    <div class="tbl-wrap"><table id="modelsTable"><tbody></tbody></table></div>
+    <p class="note" id="modelsNote"></p>
+  </section>
+
+  <footer>Personal panel · data from AIHubMix &amp; DeepSeek account APIs · <span id="stamp"></span></footer>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const TOKEN_KEY = 'aup_token';
+  const $ = (id) => document.getElementById(id);
+  let token = localStorage.getItem(TOKEN_KEY) || '';
+  const state = { range: '7d', from: '', to: '' };
+  const charts = {};
+
+  // ── helpers ────────────────────────────────────────────────────────────
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const usd = (n, d = 2) => (n === null || n === undefined || !isFinite(n)) ? '—' : '$' + Number(n).toFixed(d);
+  const money = (n, cur, d = 2) => (n === null || n === undefined || !isFinite(n)) ? '—' : Number(n).toFixed(d) + (cur ? ' ' + cur : '');
+  const num = (n) => (n === null || n === undefined || !isFinite(n)) ? '—' : Number(n).toLocaleString('en-US');
+  const compact = (n) => {
+    const a = Math.abs(n);
+    if (a >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+    if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (a >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+    return String(Math.round(n * 100) / 100);
+  };
+  const when = (ts) => ts ? new Date(ts).toLocaleString() : 'never';
+  const stampShort = (ts) => {
+    const d = new Date(ts);
+    return d.toLocaleString([], d.getTime() - Date.now() < -864e5 || true
+      ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+      : { hour: '2-digit', minute: '2-digit' });
+  };
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, {
+      ...opts,
+      headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) },
+    });
+    if (res.status === 401) { signOut(true); throw new Error('Unauthorized'); }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.success === false) throw new Error(body.message || ('HTTP ' + res.status));
+    return body;
+  }
+
+  // ── auth ───────────────────────────────────────────────────────────────
+  function signOut(silent) {
+    token = '';
+    localStorage.removeItem(TOKEN_KEY);
+    $('overlay').classList.add('show');
+    if (!silent) $('loginErr').textContent = '';
+  }
+
+  $('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = $('loginErr');
+    err.textContent = '';
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: $('pw').value }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.token) throw new Error(body.message || 'Login failed');
+      token = body.token;
+      localStorage.setItem(TOKEN_KEY, token);
+      $('pw').value = '';
+      $('overlay').classList.remove('show');
+      load();
+    } catch (ex) {
+      err.textContent = ex.message;
+    }
+  });
+  $('logout').addEventListener('click', () => signOut(false));
+
+  // ── range controls ─────────────────────────────────────────────────────
+  $('seg').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-range]');
+    if (!b) return;
+    state.range = b.dataset.range;
+    state.from = ''; state.to = '';
+    $('from').value = ''; $('to').value = '';
+    paintSeg();
+    load();
+  });
+  ['from', 'to'].forEach((id) => $(id).addEventListener('change', () => {
+    state.from = $('from').value;
+    state.to = $('to').value;
+    if (state.from || state.to) { state.range = ''; paintSeg(); }
+    load();
+  }));
+  function paintSeg() {
+    document.querySelectorAll('#seg button').forEach((b) =>
+      b.classList.toggle('on', b.dataset.range === state.range));
+  }
+
+  $('refresh').addEventListener('click', async () => {
+    const btn = $('refresh');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span> Collecting…';
+    try { await api('/api/collect', { method: 'POST' }); } catch (e) { console.warn(e); }
+    btn.disabled = false;
+    btn.textContent = 'Refresh';
+    load();
+  });
+
+  // ── charts ─────────────────────────────────────────────────────────────
+  const GRID = 'rgba(255,255,255,0.06)';
+  const TICK = '#8b95ad';
+  Chart.defaults.color = TICK;
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.font.size = 11;
+
+  function draw(id, cfg) {
+    if (charts[id]) charts[id].destroy();
+    charts[id] = new Chart($(id), cfg);
+  }
+  const baseScale = () => ({ grid: { color: GRID, drawBorder: false }, ticks: { maxTicksLimit: 6 } });
+
+  function lineChart(id, labels, data, color, soft, fmt, fill) {
+    draw(id, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          data, borderColor: color, backgroundColor: soft, fill: fill !== false,
+          borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: .3,
+        }],
+      },
+      options: {
+        maintainAspectRatio: false, animation: { duration: 250 },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmt(c.parsed.y) } } },
+        scales: { x: { ...baseScale(), grid: { display: false } }, y: { ...baseScale(), ticks: { callback: (v) => fmt(v) } } },
+      },
+    });
+  }
+
+  function barChart(id, labels, data, color, soft, fmt, horizontal) {
+    draw(id, {
+      type: 'bar',
+      data: { labels, datasets: [{ data, backgroundColor: soft, borderColor: color, borderWidth: 1.4, borderRadius: 5 }] },
+      options: {
+        maintainAspectRatio: false,
+        indexAxis: horizontal ? 'y' : 'x',
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmt(c.parsed[horizontal ? 'x' : 'y']) } } },
+        scales: {
+          x: { ...baseScale(), grid: { display: horizontal, color: GRID } },
+          y: { ...baseScale(), grid: { display: !horizontal, color: GRID }, ticks: { maxTicksLimit: 8 } },
+        },
+      },
+    });
+  }
+
+  function doughnut(id, labels, data, palette) {
+    draw(id, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data, backgroundColor: palette, borderColor: '#141a29', borderWidth: 2 }] },
+      options: {
+        maintainAspectRatio: false, cutout: '58%',
+        plugins: {
+          legend: { position: 'right', labels: { boxWidth: 10, boxHeight: 10, padding: 10 } },
+          tooltip: { callbacks: { label: (c) => `${c.label}: ${money(c.parsed, window.__dsCur)}` } },
+        },
+      },
+    });
+  }
+
+  // ── rendering ──────────────────────────────────────────────────────────
+  function cardQuotaHi(ov) {
+    const a = ov.aihubmix;
+    if (!a.configured) return `<div class="card plat hi"><h2>AIHubMix</h2><div class="empty">AIHUBMIX_MANAGE_KEY not set.</div></div>`;
+    return `<div class="card plat hi">
+      <h2>AIHubMix · quota</h2>
+      <div class="big">${usd(a.balance_usd)}<small>remaining</small></div>
+      <div style="margin-top:10px">
+        <div class="kv"><span>Lifetime used</span><span>${usd(a.used_usd)}</span></div>
+        <div class="kv"><span>Requests (lifetime)</span><span>${num(a.request_count)}</span></div>
+        <div class="kv"><span>Keys</span><span>${a.keys.length}</span></div>
+        <div class="kv"><span>Group</span><span>${esc(a.group || '—')}</span></div>
+        <div class="kv"><span>Updated</span><span>${when(a.ts)}</span></div>
+      </div>
+    </div>`;
+  }
+
+  function cardQuotaDs(ov) {
+    const d = ov.deepseek;
+    if (!d.configured) return `<div class="card plat ds"><h2>DeepSeek</h2><div class="empty">DEEPSEEK_API_KEY not set.</div></div>`;
+    const cur = d.currency || '';
+    return `<div class="card plat ds">
+      <h2>DeepSeek · quota</h2>
+      <div class="big">${money(d.total_balance, cur)}<small>remaining</small></div>
+      <div style="margin-top:10px">
+        <div class="kv"><span>Granted</span><span>${money(d.granted_balance, cur)}</span></div>
+        <div class="kv"><span>Topped up</span><span>${money(d.topped_up_balance, cur)}</span></div>
+        <div class="kv"><span>Status</span><span class="pill ${d.is_available ? 'ok' : 'bad'}">${d.is_available ? 'available' : 'unavailable'}</span></div>
+        <div class="kv"><span>Per-model usage</span><span>${d.usage_api ? '<span class="pill ok">on</span>' : '<span class="pill">off</span>'}</span></div>
+        <div class="kv"><span>Updated</span><span>${when(d.ts)}</span></div>
+      </div>
+    </div>`;
+  }
+
+  function renderKeys(usage) {
+    const rows = usage.aihubmix.keys;
+    const head = `<thead><tr><th>Key</th><th>Spend (window)</th><th>Used (lifetime)</th><th>Remaining</th><th>Status</th><th>Models</th></tr></thead>`;
+    if (!rows.length) {
+      $('keysTable').innerHTML = head + `<tbody><tr><td colspan="6" class="empty">No key snapshots in this window.</td></tr></tbody>`;
+      $('keysNote').textContent = '';
+      return;
+    }
+    const body = rows.map((k) => `<tr>
+      <td>${esc(k.name || ('key #' + k.token_id))}<div class="tag">#${k.token_id}</div></td>
+      <td class="num">${usd(k.spend_usd, 4)}</td>
+      <td class="num">${usd(k.used_usd)}</td>
+      <td class="num">${k.unlimited ? '∞' : usd(k.remain_usd)}</td>
+      <td>${k.status === 1 ? '<span class="pill ok">enabled</span>' : '<span class="pill bad">disabled</span>'}</td>
+      <td class="tag">${k.models ? esc(k.models) : 'all'}</td>
+    </tr>`).join('');
+    $('keysTable').innerHTML = head + `<tbody>${body}</tbody>`;
+    $('keysNote').textContent =
+      `Per-key spend is the change in each key's lifetime counter between the first and last snapshot in the window (${usage.aihubmix.points} snapshot(s)). AIHubMix does not expose a per-model usage API for the account key; only DeepSeek offers a per-model breakdown.`;
+  }
+
+  function renderModels(usage) {
+    const ds = usage.deepseek;
+    const head = `<thead><tr><th>Model</th><th>Requests</th><th>Tokens</th><th>Cache hit / miss</th><th>Output</th><th>Cost</th></tr></thead>`;
+    if (!ds.usage_api) {
+      $('modelsTable').innerHTML = head + `<tbody><tr><td colspan="6" class="empty">Per-model usage is off — set DEEPSEEK_PLATFORM_TOKEN to enable it.</td></tr></tbody>`;
+      $('modelsNote').textContent = 'DeepSeek has no official per-model usage API; the token reads the console usage endpoint. See README.';
+      return;
+    }
+    if (!ds.models.length) {
+      $('modelsTable').innerHTML = head + `<tbody><tr><td colspan="6" class="empty">No DeepSeek usage rows for this window yet.</td></tr></tbody>`;
+      return;
+    }
+    const cur = ds.usage_currency || '';
+    const body = ds.models.map((m) => `<tr>
+      <td>${esc(m.model)}</td>
+      <td class="num">${num(m.requests)}</td>
+      <td class="num">${compact(m.tokens)}</td>
+      <td class="num">${compact(m.cache_hit)} / ${compact(m.cache_miss)}</td>
+      <td class="num">${compact(m.output)}</td>
+      <td class="num">${money(m.cost, cur)}</td>
+    </tr>`).join('');
+    $('modelsTable').innerHTML = head + `<tbody>${body}</tbody>`;
+    $('modelsNote').textContent = `Amounts are in ${cur || 'the platform billing currency'} as reported by DeepSeek's console usage API.`;
+  }
+
+  function renderCharts(usage) {
+    const hi = usage.aihubmix;
+    const ds = usage.deepseek;
+
+    // AIHubMix cumulative spend
+    if (hi.series.length >= 1) {
+      const base = hi.baseline_used_usd || 0;
+      lineChart('chHi', hi.series.map((p) => stampShort(p.ts)),
+        hi.series.map((p) => Math.max(0, p.used_usd - base)),
+        '#7c8cff', 'rgba(124,140,255,.16)', (v) => usd(v, 3));
+    } else { drawEmpty('chHi', 'No snapshots in this window.'); }
+
+    // DeepSeek balance
+    if (ds.series.length >= 1) {
+      lineChart('chDs', ds.series.map((p) => stampShort(p.ts)),
+        ds.series.map((p) => p.balance), '#22d3ee', 'rgba(34,211,238,.14)',
+        (v) => money(v, ds.currency || ''), false);
+    } else { drawEmpty('chDs', 'No snapshots in this window.'); }
+
+    // per key
+    const keys = hi.keys.slice(0, 12);
+    if (keys.length) {
+      barChart('chKeys', keys.map((k) => k.name || ('#' + k.token_id)),
+        keys.map((k) => k.spend_usd), '#7c8cff', 'rgba(124,140,255,.55)',
+        (v) => usd(v, 4), true);
+    } else { drawEmpty('chKeys', 'No key data.'); }
+
+    // deepseek models
+    window.__dsCur = ds.usage_currency || '';
+    if (ds.models.length) {
+      const pal = ['#22d3ee', '#7c8cff', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#60a5fa', '#fb923c'];
+      doughnut('chModels', ds.models.map((m) => m.model), ds.models.map((m) => m.cost),
+        ds.models.map((_, i) => pal[i % pal.length]));
+      $('dsModelHint').textContent = `Cost by model, ${ds.usage_currency || 'platform currency'}.`;
+    } else { drawEmpty('chModels', ds.usage_api ? 'No per-model rows yet.' : 'Per-model usage off (set DEEPSEEK_PLATFORM_TOKEN).'); }
+  }
+
+  function drawEmpty(id, text) {
+    draw(id, {
+      type: 'doughnut',
+      data: { labels: [text], datasets: [{ data: [1], backgroundColor: ['#1b2233'], borderWidth: 0 }] },
+      options: {
+        maintainAspectRatio: false, cutout: '72%', events: [],
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      },
+    });
+  }
+
+  function summaryCards(usage) {
+    const hi = usage.aihubmix, ds = usage.deepseek;
+    const cards = [];
+    cards.push(`<div class="card">
+      <h2>AIHubMix · window</h2>
+      <div class="big">${usd(hi.spend_usd, 4)}<small>spent</small></div>
+      <div style="margin-top:8px">
+        <div class="kv"><span>Requests</span><span>${num(hi.requests)}</span></div>
+        <div class="kv"><span>Snapshots</span><span>${hi.points}</span></div>
+        <div class="kv"><span>Balance now</span><span>${usd(hi.balance_usd)}</span></div>
+      </div>
+    </div>`);
+    cards.push(`<div class="card">
+      <h2>DeepSeek · window</h2>
+      <div class="big">${money(ds.spend, ds.currency)}<small>spent</small></div>
+      <div style="margin-top:8px">
+        <div class="kv"><span>Balance now</span><span>${money(ds.balance, ds.currency)}</span></div>
+        <div class="kv"><span>Snapshots</span><span>${ds.points}</span></div>
+        <div class="kv"><span>Models seen</span><span>${ds.models.length}</span></div>
+      </div>
+    </div>`);
+    return cards.join('');
+  }
+
+  // ── main load ──────────────────────────────────────────────────────────
+  async function load() {
+    let overview;
+    try {
+      overview = await api('/api/overview');
+    } catch (e) {
+      if (e.message !== 'Unauthorized') {
+        $('warnings').innerHTML = `<div class="warnbox">overview: ${esc(e.message)}</div>`;
+      }
+      return;
+    }
+
+    const qs = new URLSearchParams();
+    if (state.range) qs.set('range', state.range);
+    else {
+      if (state.from) qs.set('from', new Date(state.from + 'T00:00:00').toISOString());
+      if (state.to) qs.set('to', new Date(state.to + 'T23:59:59').toISOString());
+    }
+    const usage = await api('/api/usage?' + qs.toString());
+
+    $('cards').innerHTML = cardQuotaHi(overview) + cardQuotaDs(overview) + summaryCards(usage);
+
+    const warns = [];
+    if (overview.warnings && overview.warnings.length) warns.push(...overview.warnings);
+    $('warnings').innerHTML = warns.length
+      ? `<div class="warnbox"><b>Collection notes:</b><br>${warns.map(esc).join('<br>')}</div>` : '';
+
+    renderCharts(usage);
+    renderKeys(usage);
+    renderModels(usage);
+    $('stamp').textContent = 'updated ' + when(Date.now()) + ' · ' + usage.aihubmix.points + ' AIHubMix / ' + usage.deepseek.points + ' DeepSeek snapshots in window';
+  }
+
+  // ── boot ───────────────────────────────────────────────────────────────
+  paintSeg();
+  if (token) { $('overlay').classList.remove('show'); load(); }
+  else { $('overlay').classList.add('show'); }
+})();
+</script>
+</body>
+</html>
